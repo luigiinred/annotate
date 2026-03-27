@@ -75,9 +75,6 @@
 
     .canvas-area {
       flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       padding: 20px;
       overflow: auto;
       background: #12122a;
@@ -481,12 +478,9 @@
           history = [];
           historyIndex = -1;
 
-          const maxWidth = Math.min(img.width, window.innerWidth - 340);
-          const maxHeight = Math.min(img.height, window.innerHeight - 100);
-          const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
-
-          canvas.width = img.width * scale;
-          canvas.height = img.height * scale;
+          // Use full resolution
+          canvas.width = img.width;
+          canvas.height = img.height;
 
           dropZone.style.display = 'none';
           canvas.style.display = 'block';
