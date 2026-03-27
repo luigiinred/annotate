@@ -75,9 +75,59 @@
 
     .canvas-area {
       flex: 1;
-      padding: 20px;
-      overflow: auto;
+      overflow: hidden;
       background: #12122a;
+      position: relative;
+    }
+
+    .canvas-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      overflow: hidden;
+      cursor: grab;
+    }
+
+    .canvas-wrapper.dragging {
+      cursor: grabbing;
+    }
+
+    .canvas-wrapper.drawing {
+      cursor: crosshair;
+    }
+
+    .zoom-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      display: flex;
+      gap: 8px;
+      background: rgba(22, 33, 62, 0.9);
+      padding: 8px 12px;
+      border-radius: 8px;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .zoom-controls button {
+      background: #0f3460;
+      border: none;
+      color: #eee;
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .zoom-controls button:hover { background: #e94560; }
+
+    .zoom-controls span {
+      font-size: 12px;
+      min-width: 45px;
+      text-align: center;
     }
 
     #canvas {
@@ -220,6 +270,64 @@
       font-size: 12px;
     }
 
+    /* Layer Settings */
+    .layer-settings {
+      border-top: 1px solid #0f3460;
+      padding: 12px;
+      background: #0d1a30;
+    }
+
+    .layer-settings h4 {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+
+    .setting-row label {
+      font-size: 12px;
+      color: #aaa;
+      min-width: 50px;
+    }
+
+    .setting-row input[type="color"] {
+      width: 32px;
+      height: 28px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    .setting-row input[type="range"] {
+      flex: 1;
+      cursor: pointer;
+    }
+
+    .setting-row input[type="text"] {
+      flex: 1;
+      background: #0f3460;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 4px;
+      color: #eee;
+      font-size: 12px;
+    }
+
+    .setting-row span {
+      font-size: 11px;
+      color: #666;
+      min-width: 30px;
+    }
+
     /* Resize handles */
     .handle {
       position: absolute;
@@ -260,7 +368,16 @@
         <button onclick="document.getElementById('fileInput').click()">Choose File</button>
         <input type="file" id="fileInput" accept="image/*">
       </div>
-      <canvas id="canvas" style="display: none;"></canvas>
+      <div class="canvas-wrapper" id="canvasWrapper" style="display: none;">
+        <canvas id="canvas"></canvas>
+      </div>
+      <div class="zoom-controls" id="zoomControls" style="display: none;">
+        <button id="zoomOutBtn" title="Zoom out">−</button>
+        <span id="zoomLevel">100%</span>
+        <button id="zoomInBtn" title="Zoom in">+</button>
+        <button id="zoomFitBtn" title="Fit to window">Fit</button>
+        <button id="zoomResetBtn" title="Reset to 100%">1:1</button>
+      </div>
     </div>
 
     <div class="layers-panel" id="layersPanel" style="display: none;">
@@ -270,6 +387,27 @@
       </div>
       <div class="layers-list" id="layersList">
         <div class="empty-layers">Draw annotations to add layers</div>
+      </div>
+      <div class="layer-settings" id="layerSettings" style="display: none;">
+        <h4>Layer Settings</h4>
+        <div class="setting-row">
+          <label>Color</label>
+          <input type="color" id="layerColor">
+        </div>
+        <div class="setting-row">
+          <label>Width</label>
+          <input type="range" id="layerWidth" min="2" max="30">
+          <span id="layerWidthVal">6</span>
+        </div>
+        <div class="setting-row" id="textSettingRow" style="display: none;">
+          <label>Text</label>
+          <input type="text" id="layerText">
+        </div>
+        <div class="setting-row" id="fontSizeRow" style="display: none;">
+          <label>Size</label>
+          <input type="range" id="layerFontSize" min="12" max="120">
+          <span id="layerFontSizeVal">36</span>
+        </div>
       </div>
     </div>
   </div>
@@ -282,6 +420,10 @@
     const layersPanel = document.getElementById('layersPanel');
     const layersList = document.getElementById('layersList');
     const fileInput = document.getElementById('fileInput');
+    const canvasWrapper = document.getElementById('canvasWrapper');
+    const zoomControls = document.getElementById('zoomControls');
+    const canvasArea = document.getElementById('canvasArea');
+    const layerSettings = document.getElementById('layerSettings');
 
     let baseImage = null;
     let layers = [];
@@ -290,6 +432,7 @@
     let isDrawing = false;
     let isDragging = false;
     let isResizing = false;
+    let isPanning = false;
     let resizeHandle = null;
     let startX, startY;
     let dragOffsetX, dragOffsetY;
@@ -298,6 +441,13 @@
     let layerIdCounter = 0;
     let history = [];
     let historyIndex = -1;
+
+    // Zoom and pan state
+    let zoom = 1;
+    let panX = 0;
+    let panY = 0;
+    let lastPanX = 0;
+    let lastPanY = 0;
 
     // Tool buttons
     const tools = ['select', 'crop', 'circle', 'rect', 'arrow', 'line', 'highlight', 'text'];
@@ -326,12 +476,9 @@
     }
 
     function updateCursor() {
-      if (currentTool === 'select') {
-        canvas.style.cursor = 'default';
-      } else if (currentTool === 'text') {
-        canvas.style.cursor = 'text';
-      } else {
-        canvas.style.cursor = 'crosshair';
+      canvasWrapper.classList.remove('drawing');
+      if (currentTool !== 'select') {
+        canvasWrapper.classList.add('drawing');
       }
     }
 
@@ -370,6 +517,103 @@
 
     document.getElementById('exportBtn').addEventListener('click', exportImage);
     document.getElementById('newBtn').addEventListener('click', () => fileInput.click());
+
+    // Zoom controls
+    document.getElementById('zoomInBtn').addEventListener('click', () => setZoom(zoom * 1.25));
+    document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(zoom / 1.25));
+    document.getElementById('zoomResetBtn').addEventListener('click', () => { setZoom(1); centerCanvas(); });
+    document.getElementById('zoomFitBtn').addEventListener('click', fitToWindow);
+
+    function setZoom(newZoom) {
+      zoom = Math.max(0.1, Math.min(10, newZoom));
+      applyTransform();
+      document.getElementById('zoomLevel').textContent = Math.round(zoom * 100) + '%';
+    }
+
+    function applyTransform() {
+      canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+      canvas.style.transformOrigin = '0 0';
+    }
+
+    function fitToWindow() {
+      const areaRect = canvasArea.getBoundingClientRect();
+      const padding = 40;
+      const scaleX = (areaRect.width - padding * 2) / canvas.width;
+      const scaleY = (areaRect.height - padding * 2) / canvas.height;
+      setZoom(Math.min(scaleX, scaleY, 1));
+      centerCanvas();
+    }
+
+    function centerCanvas() {
+      const areaRect = canvasArea.getBoundingClientRect();
+      panX = (areaRect.width - canvas.width * zoom) / 2;
+      panY = (areaRect.height - canvas.height * zoom) / 2;
+      applyTransform();
+    }
+
+    // Layer settings
+    document.getElementById('layerColor').addEventListener('input', (e) => {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (layer) {
+        layer.color = e.target.value;
+        saveHistory();
+        redraw();
+        renderLayers();
+      }
+    });
+
+    document.getElementById('layerWidth').addEventListener('input', (e) => {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (layer) {
+        layer.size = parseInt(e.target.value);
+        document.getElementById('layerWidthVal').textContent = layer.size;
+        saveHistory();
+        redraw();
+      }
+    });
+
+    document.getElementById('layerText').addEventListener('input', (e) => {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (layer && layer.type === 'text') {
+        layer.text = e.target.value;
+        saveHistory();
+        redraw();
+        renderLayers();
+      }
+    });
+
+    document.getElementById('layerFontSize').addEventListener('input', (e) => {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (layer && layer.type === 'text') {
+        layer.fontSize = parseInt(e.target.value);
+        document.getElementById('layerFontSizeVal').textContent = layer.fontSize;
+        saveHistory();
+        redraw();
+      }
+    });
+
+    function updateLayerSettings() {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (!layer) {
+        layerSettings.style.display = 'none';
+        return;
+      }
+
+      layerSettings.style.display = 'block';
+      document.getElementById('layerColor').value = layer.color;
+      document.getElementById('layerWidth').value = layer.size;
+      document.getElementById('layerWidthVal').textContent = layer.size;
+
+      const isText = layer.type === 'text';
+      document.getElementById('textSettingRow').style.display = isText ? 'flex' : 'none';
+      document.getElementById('fontSizeRow').style.display = isText ? 'flex' : 'none';
+
+      if (isText) {
+        document.getElementById('layerText').value = layer.text || '';
+        document.getElementById('layerFontSize').value = layer.fontSize || 36;
+        document.getElementById('layerFontSizeVal').textContent = layer.fontSize || 36;
+      }
+    }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -483,9 +727,16 @@
           canvas.height = img.height;
 
           dropZone.style.display = 'none';
-          canvas.style.display = 'block';
+          canvasWrapper.style.display = 'block';
+          zoomControls.style.display = 'flex';
           toolbar.style.display = 'flex';
           layersPanel.style.display = 'flex';
+
+          // Initialize zoom and center
+          zoom = 1;
+          panX = 0;
+          panY = 0;
+          fitToWindow();
 
           saveHistory();
           redraw();
@@ -729,11 +980,95 @@
       return null;
     }
 
+    // Get canvas coordinates accounting for zoom/pan
+    function getCanvasCoords(e) {
+      const rect = canvasWrapper.getBoundingClientRect();
+      const x = (e.clientX - rect.left - panX) / zoom;
+      const y = (e.clientY - rect.top - panY) / zoom;
+      return { x, y };
+    }
+
+    // Pan with middle mouse or space+drag
+    let spacePressed = false;
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !e.target.matches('input')) {
+        spacePressed = true;
+        canvasWrapper.style.cursor = 'grab';
+      }
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        spacePressed = false;
+        if (!isPanning) {
+          updateCursor();
+        }
+      }
+    });
+
+    canvasWrapper.addEventListener('mousedown', (e) => {
+      if (e.button === 1 || spacePressed) {
+        // Middle mouse or space - start panning
+        isPanning = true;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        canvasWrapper.classList.add('dragging');
+        e.preventDefault();
+        return;
+      }
+    });
+
+    canvasWrapper.addEventListener('mousemove', (e) => {
+      if (isPanning) {
+        panX += e.clientX - lastPanX;
+        panY += e.clientY - lastPanY;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        applyTransform();
+        return;
+      }
+    });
+
+    canvasWrapper.addEventListener('mouseup', (e) => {
+      if (isPanning) {
+        isPanning = false;
+        canvasWrapper.classList.remove('dragging');
+        if (!spacePressed) updateCursor();
+      }
+    });
+
+    canvasWrapper.addEventListener('mouseleave', () => {
+      if (isPanning) {
+        isPanning = false;
+        canvasWrapper.classList.remove('dragging');
+      }
+    });
+
+    // Scroll wheel zoom
+    canvasWrapper.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvasWrapper.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Zoom toward mouse position
+      const oldZoom = zoom;
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.max(0.1, Math.min(10, zoom * delta));
+
+      // Adjust pan to zoom toward mouse
+      panX = mouseX - (mouseX - panX) * (newZoom / oldZoom);
+      panY = mouseY - (mouseY - panY) * (newZoom / oldZoom);
+
+      zoom = newZoom;
+      applyTransform();
+      document.getElementById('zoomLevel').textContent = Math.round(zoom * 100) + '%';
+    }, { passive: false });
+
     // Canvas mouse events
     canvas.addEventListener('mousedown', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      if (isPanning || spacePressed) return;
+
+      const { x, y } = getCanvasCoords(e);
       startX = x;
       startY = y;
 
@@ -801,9 +1136,9 @@
     });
 
     canvas.addEventListener('mousemove', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      if (isPanning || spacePressed) return;
+
+      const { x, y } = getCanvasCoords(e);
 
       // Update cursor for handles
       if (currentTool === 'select' && selectedLayerId !== null && !isDragging && !isResizing) {
@@ -881,9 +1216,9 @@
     });
 
     canvas.addEventListener('mouseup', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      if (isPanning || spacePressed) return;
+
+      const { x, y } = getCanvasCoords(e);
 
       if (isDragging || isResizing) {
         isDragging = false;
@@ -1076,6 +1411,7 @@
     function renderLayers() {
       if (layers.length === 0) {
         layersList.innerHTML = '<div class="empty-layers">Draw annotations to add layers</div>';
+        updateLayerSettings();
         return;
       }
 
@@ -1143,6 +1479,8 @@
 
         layersList.appendChild(item);
       });
+
+      updateLayerSettings();
     }
 
     function deleteLayer(id) {
