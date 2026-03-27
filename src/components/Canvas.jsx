@@ -12,6 +12,37 @@ import {
   getHandlePositions
 } from '../utils/drawing';
 
+// Cache for rendered SVG images
+const svgImageCache = new Map();
+
+function getSvgImage(cacheKey, svgString, width, height) {
+  if (svgImageCache.has(cacheKey)) {
+    return svgImageCache.get(cacheKey);
+  }
+
+  // Create image from SVG
+  const blob = new Blob([svgString], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+
+  // Store promise in cache
+  const promise = new Promise((resolve) => {
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      svgImageCache.set(cacheKey, img);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  });
+
+  svgImageCache.set(cacheKey, promise);
+  return promise;
+}
+
 function Canvas({
   image,
   layers,
@@ -31,6 +62,7 @@ function Canvas({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [activeHandle, setActiveHandle] = useState(null);
   const [textInput, setTextInput] = useState(null);
+  const [, forceUpdate] = useState(0);
 
   // Use ref to track the dragging layer ID synchronously
   const draggingLayerIdRef = useRef(null);
@@ -59,6 +91,9 @@ function Canvas({
     // Draw image
     ctx.drawImage(image, 0, 0);
 
+    // Track if we need to re-render after SVG loads
+    let needsRerender = false;
+
     // Draw layers
     layers.forEach(layer => {
       if (!layer.visible) return;
@@ -84,59 +119,11 @@ function Canvas({
       // Check if layer has an SVG asset
       const asset = layer.assetId ? getAsset(layer.type, layer.assetId) : null;
 
-      if (asset && (layer.type === 'arrow' || layer.type === 'line')) {
-        // Render SVG-based arrow/line
-        renderSvgArrowLine(ctx, layer, asset, style);
-      } else if (asset && (layer.type === 'circle' || layer.type === 'rect' || layer.type === 'highlight')) {
-        // Render SVG-based shape
-        renderSvgShape(ctx, layer, asset, style);
+      if (asset) {
+        const drawn = renderSvgAsset(ctx, layer, asset, style);
+        if (!drawn) needsRerender = true;
       } else {
-        // Fallback to canvas drawing
-        switch (layer.type) {
-          case 'circle':
-            if (style.style === 'sketchy' || style.style === 'marker') {
-              drawSketchyEllipse(ctx, layer.x + layer.width / 2, layer.y + layer.height / 2, layer.width / 2, layer.height / 2, style.style === 'marker' ? 1 : 2);
-            } else {
-              ctx.beginPath();
-              ctx.ellipse(layer.x + layer.width / 2, layer.y + layer.height / 2, Math.abs(layer.width / 2), Math.abs(layer.height / 2), 0, 0, Math.PI * 2);
-              ctx.stroke();
-            }
-            break;
-
-          case 'rect':
-            if (style.style === 'sketchy' || style.style === 'marker') {
-              drawSketchyRect(ctx, layer.x, layer.y, layer.width, layer.height, style.style === 'marker' ? 1 : 2);
-            } else {
-              ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
-            }
-            break;
-
-          case 'highlight':
-            ctx.fillStyle = style.color + style.highlightOpacity;
-            drawRoundedRect(ctx, layer.x, layer.y, layer.width, layer.height, 4);
-            ctx.fill();
-            break;
-
-          case 'arrow':
-            drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
-            break;
-
-          case 'line':
-            if (style.style === 'sketchy' || style.style === 'marker') {
-              drawSketchyLine(ctx, layer.x1, layer.y1, layer.x2, layer.y2, style.style === 'marker' ? 1 : 2);
-            } else {
-              ctx.beginPath();
-              ctx.moveTo(layer.x1, layer.y1);
-              ctx.lineTo(layer.x2, layer.y2);
-              ctx.stroke();
-            }
-            break;
-
-          case 'text':
-            ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-            ctx.fillText(layer.text, layer.x, layer.y);
-            break;
-        }
+        renderCanvasShape(ctx, layer, style);
       }
 
       ctx.shadowColor = 'transparent';
@@ -165,41 +152,123 @@ function Canvas({
         ctx.stroke();
       });
     }
+
+    // If SVGs are still loading, re-render when ready
+    if (needsRerender) {
+      const timeout = setTimeout(() => forceUpdate(n => n + 1), 50);
+      return () => clearTimeout(timeout);
+    }
   }, [image, layers, selectedLayerId, currentTheme]);
 
-  // Helper to render SVG arrow/line to canvas
-  function renderSvgArrowLine(ctx, layer, asset, style) {
-    const dx = layer.x2 - layer.x1;
-    const dy = layer.y2 - layer.y1;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    const angle = Math.atan2(dy, dx);
+  // Render SVG asset to canvas
+  function renderSvgAsset(ctx, layer, asset, style) {
+    let x, y, width, height, angle = 0;
 
-    ctx.save();
-    ctx.translate(layer.x1, layer.y1);
-    ctx.rotate(angle);
+    if (layer.type === 'arrow' || layer.type === 'line') {
+      const dx = layer.x2 - layer.x1;
+      const dy = layer.y2 - layer.y1;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      angle = Math.atan2(dy, dx);
 
-    // Scale SVG to fit the arrow length
-    const vbParts = asset.viewBox.split(' ').map(Number);
-    const svgWidth = vbParts[2];
-    const svgHeight = vbParts[3];
-    const scale = length / svgWidth;
+      const vbParts = asset.viewBox.split(' ').map(Number);
+      const svgWidth = vbParts[2];
+      const svgHeight = vbParts[3];
+      const scale = length / svgWidth;
 
-    // Create temporary canvas to render SVG
-    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${asset.viewBox}" width="${length}" height="${svgHeight * scale}">${asset.render(style.color, style.strokeWidth)}</svg>`;
+      x = layer.x1;
+      y = layer.y1;
+      width = length;
+      height = svgHeight * scale;
+    } else {
+      x = layer.x;
+      y = layer.y;
+      width = Math.abs(layer.width);
+      height = Math.abs(layer.height);
+    }
 
-    // Draw using Path2D from SVG paths (simplified - just use canvas drawing for now)
-    // For now, fall back to the standard drawing
-    ctx.restore();
+    // Generate SVG string
+    const svgContent = asset.render(style.color, style.strokeWidth, style.highlightOpacity);
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${asset.viewBox}" width="${width}" height="${height}">${svgContent}</svg>`;
 
-    // Use standard drawing as fallback
-    drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
+    // Create cache key
+    const cacheKey = `${asset.id}-${style.color}-${style.strokeWidth}-${Math.round(width)}-${Math.round(height)}`;
+
+    const cached = svgImageCache.get(cacheKey);
+
+    if (cached instanceof Image) {
+      // Image is ready, draw it
+      ctx.save();
+      if (layer.type === 'arrow' || layer.type === 'line') {
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.drawImage(cached, 0, -height / 2, width, height);
+      } else {
+        ctx.drawImage(cached, x, y, width, height);
+      }
+      ctx.restore();
+      return true;
+    } else if (cached instanceof Promise) {
+      // Still loading, fall back to canvas drawing
+      renderCanvasShape(ctx, layer, style);
+      return false;
+    } else {
+      // Not cached, start loading
+      getSvgImage(cacheKey, svgString, width, height).then(() => {
+        forceUpdate(n => n + 1);
+      });
+      // Fall back to canvas drawing while loading
+      renderCanvasShape(ctx, layer, style);
+      return false;
+    }
   }
 
-  // Helper to render SVG shape to canvas
-  function renderSvgShape(ctx, layer, asset, style) {
-    // For shapes, we scale the SVG to fit the layer bounds
-    // For now, fall back to standard drawing
-    // Full SVG rendering would require creating an Image from SVG data
+  // Render shape using canvas drawing (fallback)
+  function renderCanvasShape(ctx, layer, style) {
+    switch (layer.type) {
+      case 'circle':
+        if (style.style === 'sketchy' || style.style === 'marker') {
+          drawSketchyEllipse(ctx, layer.x + layer.width / 2, layer.y + layer.height / 2, layer.width / 2, layer.height / 2, style.style === 'marker' ? 1 : 2);
+        } else {
+          ctx.beginPath();
+          ctx.ellipse(layer.x + layer.width / 2, layer.y + layer.height / 2, Math.abs(layer.width / 2), Math.abs(layer.height / 2), 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+
+      case 'rect':
+        if (style.style === 'sketchy' || style.style === 'marker') {
+          drawSketchyRect(ctx, layer.x, layer.y, layer.width, layer.height, style.style === 'marker' ? 1 : 2);
+        } else {
+          ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
+        }
+        break;
+
+      case 'highlight':
+        ctx.fillStyle = style.color + style.highlightOpacity;
+        drawRoundedRect(ctx, layer.x, layer.y, layer.width, layer.height, 4);
+        ctx.fill();
+        break;
+
+      case 'arrow':
+        drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
+        break;
+
+      case 'line':
+        if (style.style === 'sketchy' || style.style === 'marker') {
+          drawSketchyLine(ctx, layer.x1, layer.y1, layer.x2, layer.y2, style.style === 'marker' ? 1 : 2);
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(layer.x1, layer.y1);
+          ctx.lineTo(layer.x2, layer.y2);
+          ctx.stroke();
+        }
+        break;
+
+      case 'text':
+        ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(layer.text, layer.x, layer.y);
+        break;
+    }
   }
 
   const getCanvasCoords = useCallback((e) => {
