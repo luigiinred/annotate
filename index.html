@@ -160,11 +160,14 @@
 
     .layer-item:hover { background: #1a4a7a; }
     .layer-item.selected { border-color: #e94560; background: #1a4a7a; }
+    .layer-item.hidden { opacity: 0.5; }
 
     .layer-item.dragging {
       opacity: 0.5;
       transform: scale(0.98);
     }
+
+    .visibility-btn.hidden { opacity: 0.4; }
 
     .layer-color {
       width: 16px;
@@ -202,6 +205,15 @@
     .layer-actions button:hover {
       background: rgba(233, 69, 96, 0.3);
       color: #e94560;
+    }
+
+    .visibility-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 14px;
+      flex-shrink: 0;
     }
 
     .empty-layers {
@@ -496,7 +508,11 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
 
-      layers.forEach(layer => drawLayer(layer, layer.id === selectedLayerId));
+      layers.forEach(layer => {
+        if (layer.visible !== false) {
+          drawLayer(layer, layer.id === selectedLayerId);
+        }
+      });
     }
 
     function drawLayer(layer, isSelected) {
@@ -673,9 +689,9 @@
           }
         }
 
-        // Check for layer hit (reverse order for top-most)
+        // Check for layer hit (reverse order for top-most, skip hidden)
         for (let i = layers.length - 1; i >= 0; i--) {
-          if (hitTest(x, y, layers[i])) {
+          if (layers[i].visible !== false && hitTest(x, y, layers[i])) {
             selectedLayerId = layers[i].id;
             isDragging = true;
             const bounds = getLayerBounds(layers[i]);
@@ -1010,7 +1026,9 @@
         item.draggable = true;
         item.dataset.id = layer.id;
 
+        const isVisible = layer.visible !== false;
         item.innerHTML = `
+          <button class="visibility-btn ${isVisible ? '' : 'hidden'}" title="Toggle visibility">${isVisible ? '👁' : '👁‍🗨'}</button>
           <div class="layer-color" style="background: ${layer.color}"></div>
           <div class="layer-info">
             <div class="layer-type">${layer.type}${layer.text ? ': ' + layer.text.substring(0, 10) : ''}</div>
@@ -1020,12 +1038,15 @@
             <button class="delete-btn" title="Delete">×</button>
           </div>
         `;
+        if (!isVisible) item.classList.add('hidden');
 
         item.addEventListener('click', (e) => {
           if (e.target.classList.contains('delete-btn')) {
             deleteLayer(layer.id);
           } else if (e.target.classList.contains('duplicate-btn')) {
             duplicateLayer(layer.id);
+          } else if (e.target.classList.contains('visibility-btn')) {
+            toggleLayerVisibility(layer.id);
           } else {
             selectedLayerId = layer.id;
             currentTool = 'select';
@@ -1068,6 +1089,16 @@
       saveHistory();
       redraw();
       renderLayers();
+    }
+
+    function toggleLayerVisibility(id) {
+      const layer = layers.find(l => l.id === id);
+      if (layer) {
+        layer.visible = layer.visible === false ? true : false;
+        saveHistory();
+        redraw();
+        renderLayers();
+      }
     }
 
     function duplicateLayer(id) {
