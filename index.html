@@ -795,7 +795,7 @@
           break;
 
         case 'arrow':
-          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, layer.size, layer.color);
+          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, layer.size, layer.color, layer.curveX, layer.curveY);
           break;
 
         case 'line':
@@ -826,7 +826,7 @@
       ctx.shadowOffsetY = 0;
 
       if (isSelected) {
-        drawSelectionHandles(bounds, layer.type);
+        drawSelectionHandles(layer);
       }
     }
 
@@ -845,89 +845,152 @@
       ctx.closePath();
     }
 
-    function drawArrow(fromX, fromY, toX, toY, size, color) {
-      const angle = Math.atan2(toY - fromY, toX - fromX);
-      const length = Math.sqrt(Math.pow(toX - fromX, 2) + Math.pow(toY - fromY, 2));
+    function drawArrow(fromX, fromY, toX, toY, size, color, curveX, curveY) {
+      // Check if we have a curve
+      const hasCurve = curveX !== undefined && curveY !== undefined;
+      const midX = (fromX + toX) / 2;
+      const midY = (fromY + toY) / 2;
+      const isCurved = hasCurve && (Math.abs(curveX - midX) > 5 || Math.abs(curveY - midY) > 5);
 
-      // Arrow head dimensions - bold and chunky
-      const headLength = Math.max(size * 6, 25);
-      const headWidth = Math.max(size * 4, 18);
-      const shaftWidth = size;
+      // Arrow head dimensions
+      const headLength = Math.max(size * 5, 20);
+      const headWidth = Math.max(size * 3.5, 14);
 
-      // Calculate where the shaft meets the head
-      const shaftEndX = toX - headLength * Math.cos(angle);
-      const shaftEndY = toY - headLength * Math.sin(angle);
+      if (isCurved) {
+        // Draw curved arrow
+        // Calculate angle at the end point (tangent of quadratic curve)
+        const t = 0.99; // Near the end
+        const tangentX = 2 * (1 - t) * (curveX - fromX) + 2 * t * (toX - curveX);
+        const tangentY = 2 * (1 - t) * (curveY - fromY) + 2 * t * (toY - curveY);
+        const endAngle = Math.atan2(tangentY, tangentX);
 
-      // Draw the entire arrow as one filled shape
-      ctx.beginPath();
+        // Draw curved shaft
+        ctx.lineWidth = size * 2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(fromX, fromY);
+        ctx.quadraticCurveTo(curveX, curveY, toX - headLength * 0.7 * Math.cos(endAngle), toY - headLength * 0.7 * Math.sin(endAngle));
+        ctx.stroke();
 
-      // Start at the back of the arrow (rounded)
-      const backLeftX = fromX + shaftWidth * Math.cos(angle + Math.PI / 2);
-      const backLeftY = fromY + shaftWidth * Math.sin(angle + Math.PI / 2);
-      const backRightX = fromX + shaftWidth * Math.cos(angle - Math.PI / 2);
-      const backRightY = fromY + shaftWidth * Math.sin(angle - Math.PI / 2);
+        // Draw arrow head
+        ctx.beginPath();
+        ctx.moveTo(toX, toY);
+        ctx.lineTo(toX - headLength * Math.cos(endAngle - Math.PI / 7), toY - headLength * Math.sin(endAngle - Math.PI / 7));
+        ctx.lineTo(toX - headLength * 0.7 * Math.cos(endAngle), toY - headLength * 0.7 * Math.sin(endAngle));
+        ctx.lineTo(toX - headLength * Math.cos(endAngle + Math.PI / 7), toY - headLength * Math.sin(endAngle + Math.PI / 7));
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Draw straight arrow
+        const angle = Math.atan2(toY - fromY, toX - fromX);
+        const shaftWidth = size;
 
-      // Shaft sides
-      const shaftLeftX = shaftEndX + shaftWidth * Math.cos(angle + Math.PI / 2);
-      const shaftLeftY = shaftEndY + shaftWidth * Math.sin(angle + Math.PI / 2);
-      const shaftRightX = shaftEndX + shaftWidth * Math.cos(angle - Math.PI / 2);
-      const shaftRightY = shaftEndY + shaftWidth * Math.sin(angle - Math.PI / 2);
+        // Calculate where the shaft meets the head
+        const shaftEndX = toX - headLength * Math.cos(angle);
+        const shaftEndY = toY - headLength * Math.sin(angle);
 
-      // Arrow head wings
-      const wingLeftX = shaftEndX + headWidth * Math.cos(angle + Math.PI / 2);
-      const wingLeftY = shaftEndY + headWidth * Math.sin(angle + Math.PI / 2);
-      const wingRightX = shaftEndX + headWidth * Math.cos(angle - Math.PI / 2);
-      const wingRightY = shaftEndY + headWidth * Math.sin(angle - Math.PI / 2);
+        ctx.beginPath();
 
-      // Draw arrow shape
-      ctx.moveTo(backLeftX, backLeftY);
-      // Rounded back
-      ctx.arc(fromX, fromY, shaftWidth, angle + Math.PI / 2, angle - Math.PI / 2, true);
-      // Right side of shaft
-      ctx.lineTo(shaftRightX, shaftRightY);
-      // Right wing
-      ctx.lineTo(wingRightX, wingRightY);
-      // Arrow tip
-      ctx.lineTo(toX, toY);
-      // Left wing
-      ctx.lineTo(wingLeftX, wingLeftY);
-      // Left side of shaft
-      ctx.lineTo(shaftLeftX, shaftLeftY);
-      ctx.closePath();
+        // Rounded back
+        ctx.arc(fromX, fromY, shaftWidth, angle + Math.PI / 2, angle - Math.PI / 2, true);
 
-      ctx.fill();
+        // Right side of shaft to head
+        ctx.lineTo(shaftEndX + shaftWidth * Math.cos(angle - Math.PI / 2), shaftEndY + shaftWidth * Math.sin(angle - Math.PI / 2));
+
+        // Right wing
+        ctx.lineTo(shaftEndX + headWidth * Math.cos(angle - Math.PI / 2), shaftEndY + headWidth * Math.sin(angle - Math.PI / 2));
+
+        // Arrow tip
+        ctx.lineTo(toX, toY);
+
+        // Left wing
+        ctx.lineTo(shaftEndX + headWidth * Math.cos(angle + Math.PI / 2), shaftEndY + headWidth * Math.sin(angle + Math.PI / 2));
+
+        // Left side of shaft
+        ctx.lineTo(shaftEndX + shaftWidth * Math.cos(angle + Math.PI / 2), shaftEndY + shaftWidth * Math.sin(angle + Math.PI / 2));
+
+        ctx.closePath();
+        ctx.fill();
+      }
     }
 
-    function drawSelectionHandles(bounds, type) {
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
-      ctx.setLineDash([]);
+    function drawSelectionHandles(layer) {
+      const handles = getHandlePositions(layer);
+      const handleRadius = 5;
 
-      const handleSize = 8;
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 2;
-
-      const handles = getHandlePositions(bounds);
       handles.forEach(h => {
-        ctx.fillRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
-        ctx.strokeRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, handleRadius, 0, Math.PI * 2);
+
+        // Different colors for different handle types
+        if (h.type === 'endpoint') {
+          ctx.fillStyle = '#3b82f6'; // Blue for endpoints
+          ctx.strokeStyle = '#1d4ed8';
+        } else if (h.type === 'curve') {
+          ctx.fillStyle = '#22c55e'; // Green for curve control
+          ctx.strokeStyle = '#16a34a';
+        } else if (h.type === 'move') {
+          ctx.fillStyle = '#f59e0b'; // Orange for move
+          ctx.strokeStyle = '#d97706';
+        } else {
+          ctx.fillStyle = '#fff';
+          ctx.strokeStyle = '#e94560';
+        }
+
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
       });
     }
 
-    function getHandlePositions(bounds) {
-      return [
-        { x: bounds.x, y: bounds.y, cursor: 'nw-resize', pos: 'nw' },
-        { x: bounds.x + bounds.width, y: bounds.y, cursor: 'ne-resize', pos: 'ne' },
-        { x: bounds.x, y: bounds.y + bounds.height, cursor: 'sw-resize', pos: 'sw' },
-        { x: bounds.x + bounds.width, y: bounds.y + bounds.height, cursor: 'se-resize', pos: 'se' },
-        { x: bounds.x + bounds.width / 2, y: bounds.y, cursor: 'n-resize', pos: 'n' },
-        { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height, cursor: 's-resize', pos: 's' },
-        { x: bounds.x, y: bounds.y + bounds.height / 2, cursor: 'w-resize', pos: 'w' },
-        { x: bounds.x + bounds.width, y: bounds.y + bounds.height / 2, cursor: 'e-resize', pos: 'e' },
-      ];
+    function getHandlePositions(layer) {
+      const handles = [];
+
+      switch (layer.type) {
+        case 'arrow':
+        case 'line':
+          // Start endpoint
+          handles.push({ x: layer.x1, y: layer.y1, type: 'endpoint', pos: 'start', cursor: 'move' });
+          // End endpoint
+          handles.push({ x: layer.x2, y: layer.y2, type: 'endpoint', pos: 'end', cursor: 'move' });
+          // Curve control point (middle by default, or custom position)
+          const midX = layer.curveX !== undefined ? layer.curveX : (layer.x1 + layer.x2) / 2;
+          const midY = layer.curveY !== undefined ? layer.curveY : (layer.y1 + layer.y2) / 2;
+          handles.push({ x: midX, y: midY, type: 'curve', pos: 'curve', cursor: 'move' });
+          break;
+
+        case 'circle':
+          // Handles on the ellipse perimeter
+          const cx = layer.x + layer.width / 2;
+          const cy = layer.y + layer.height / 2;
+          const rx = layer.width / 2;
+          const ry = layer.height / 2;
+          handles.push({ x: cx, y: cy - ry, type: 'resize', pos: 'n', cursor: 'n-resize' });
+          handles.push({ x: cx, y: cy + ry, type: 'resize', pos: 's', cursor: 's-resize' });
+          handles.push({ x: cx - rx, y: cy, type: 'resize', pos: 'w', cursor: 'w-resize' });
+          handles.push({ x: cx + rx, y: cy, type: 'resize', pos: 'e', cursor: 'e-resize' });
+          break;
+
+        case 'rect':
+        case 'highlight':
+          // Corner handles only
+          handles.push({ x: layer.x, y: layer.y, type: 'resize', pos: 'nw', cursor: 'nw-resize' });
+          handles.push({ x: layer.x + layer.width, y: layer.y, type: 'resize', pos: 'ne', cursor: 'ne-resize' });
+          handles.push({ x: layer.x, y: layer.y + layer.height, type: 'resize', pos: 'sw', cursor: 'sw-resize' });
+          handles.push({ x: layer.x + layer.width, y: layer.y + layer.height, type: 'resize', pos: 'se', cursor: 'se-resize' });
+          break;
+
+        case 'text':
+          // Single move handle at text position
+          ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          const metrics = ctx.measureText(layer.text);
+          handles.push({ x: layer.x, y: layer.y - layer.fontSize / 2, type: 'move', pos: 'move', cursor: 'move' });
+          // Corner to resize font
+          handles.push({ x: layer.x + metrics.width, y: layer.y, type: 'resize', pos: 'se', cursor: 'se-resize' });
+          break;
+      }
+
+      return handles;
     }
 
     function getLayerBounds(layer) {
@@ -968,12 +1031,12 @@
     }
 
     function hitTestHandle(x, y, layer) {
-      const bounds = getLayerBounds(layer);
-      const handles = getHandlePositions(bounds);
-      const hitRadius = 8;
+      const handles = getHandlePositions(layer);
+      const hitRadius = 10;
 
       for (const handle of handles) {
-        if (Math.abs(x - handle.x) < hitRadius && Math.abs(y - handle.y) < hitRadius) {
+        const dist = Math.sqrt(Math.pow(x - handle.x, 2) + Math.pow(y - handle.y, 2));
+        if (dist < hitRadius) {
           return handle;
         }
       }
@@ -1120,6 +1183,7 @@
           };
           layers.push(layer);
           selectedLayerId = layer.id;
+          setTool('select');
           saveHistory();
           redraw();
           renderLayers();
@@ -1271,6 +1335,7 @@
 
       layers.push(layer);
       selectedLayerId = layer.id;
+      setTool('select');
       saveHistory();
       redraw();
       renderLayers();
@@ -1295,56 +1360,93 @@
     }
 
     function resizeLayer(layer, mouseX, mouseY, handle) {
-      const bounds = getLayerBounds(layer);
-      let newX = bounds.x, newY = bounds.y;
-      let newWidth = bounds.width, newHeight = bounds.height;
-
-      if (handle.pos.includes('w')) {
-        newWidth = bounds.x + bounds.width - mouseX;
-        newX = mouseX;
-      }
-      if (handle.pos.includes('e')) {
-        newWidth = mouseX - bounds.x;
-      }
-      if (handle.pos.includes('n')) {
-        newHeight = bounds.y + bounds.height - mouseY;
-        newY = mouseY;
-      }
-      if (handle.pos.includes('s')) {
-        newHeight = mouseY - bounds.y;
-      }
-
-      if (newWidth < 10) newWidth = 10;
-      if (newHeight < 10) newHeight = 10;
-
+      // Handle arrow/line specific handles
       if (layer.type === 'arrow' || layer.type === 'line') {
-        // For lines/arrows, adjust endpoints
-        const wasFlippedX = layer.x1 > layer.x2;
-        const wasFlippedY = layer.y1 > layer.y2;
+        if (handle.pos === 'start') {
+          layer.x1 = mouseX;
+          layer.y1 = mouseY;
+        } else if (handle.pos === 'end') {
+          layer.x2 = mouseX;
+          layer.y2 = mouseY;
+        } else if (handle.pos === 'curve') {
+          layer.curveX = mouseX;
+          layer.curveY = mouseY;
+        }
+        return;
+      }
+
+      // Handle text
+      if (layer.type === 'text') {
+        if (handle.pos === 'move') {
+          layer.x = mouseX;
+          layer.y = mouseY + layer.fontSize / 2;
+        } else if (handle.pos === 'se') {
+          // Resize font based on distance from origin
+          const dist = Math.sqrt(Math.pow(mouseX - layer.x, 2) + Math.pow(mouseY - layer.y, 2));
+          layer.fontSize = Math.max(12, Math.min(200, dist / 2));
+        }
+        return;
+      }
+
+      // Handle circle with perimeter handles
+      if (layer.type === 'circle') {
+        const cx = layer.x + layer.width / 2;
+        const cy = layer.y + layer.height / 2;
+
+        if (handle.pos === 'n') {
+          const newRy = cy - mouseY;
+          if (newRy > 5) {
+            layer.y = mouseY;
+            layer.height = newRy * 2;
+          }
+        } else if (handle.pos === 's') {
+          const newRy = mouseY - cy;
+          if (newRy > 5) {
+            layer.y = cy - newRy;
+            layer.height = newRy * 2;
+          }
+        } else if (handle.pos === 'w') {
+          const newRx = cx - mouseX;
+          if (newRx > 5) {
+            layer.x = mouseX;
+            layer.width = newRx * 2;
+          }
+        } else if (handle.pos === 'e') {
+          const newRx = mouseX - cx;
+          if (newRx > 5) {
+            layer.x = cx - newRx;
+            layer.width = newRx * 2;
+          }
+        }
+        return;
+      }
+
+      // Handle rect/highlight with corner handles
+      if (layer.type === 'rect' || layer.type === 'highlight') {
+        const right = layer.x + layer.width;
+        const bottom = layer.y + layer.height;
 
         if (handle.pos === 'nw') {
-          if (wasFlippedX) layer.x2 = newX; else layer.x1 = newX;
-          if (wasFlippedY) layer.y2 = newY; else layer.y1 = newY;
+          layer.width = right - mouseX;
+          layer.height = bottom - mouseY;
+          layer.x = mouseX;
+          layer.y = mouseY;
         } else if (handle.pos === 'ne') {
-          if (wasFlippedX) layer.x1 = newX + newWidth; else layer.x2 = newX + newWidth;
-          if (wasFlippedY) layer.y2 = newY; else layer.y1 = newY;
+          layer.width = mouseX - layer.x;
+          layer.height = bottom - mouseY;
+          layer.y = mouseY;
         } else if (handle.pos === 'sw') {
-          if (wasFlippedX) layer.x2 = newX; else layer.x1 = newX;
-          if (wasFlippedY) layer.y1 = newY + newHeight; else layer.y2 = newY + newHeight;
+          layer.width = right - mouseX;
+          layer.height = mouseY - layer.y;
+          layer.x = mouseX;
         } else if (handle.pos === 'se') {
-          if (wasFlippedX) layer.x1 = newX + newWidth; else layer.x2 = newX + newWidth;
-          if (wasFlippedY) layer.y1 = newY + newHeight; else layer.y2 = newY + newHeight;
+          layer.width = mouseX - layer.x;
+          layer.height = mouseY - layer.y;
         }
-      } else if (layer.type === 'text') {
-        const scale = newHeight / bounds.height;
-        layer.fontSize = Math.max(12, layer.fontSize * scale);
-        layer.x = newX;
-        layer.y = newY + newHeight;
-      } else {
-        layer.x = newX;
-        layer.y = newY;
-        layer.width = newWidth;
-        layer.height = newHeight;
+
+        // Ensure minimum size
+        if (layer.width < 10) layer.width = 10;
+        if (layer.height < 10) layer.height = 10;
       }
     }
 
