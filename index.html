@@ -244,9 +244,9 @@
     <button id="textBtn" title="Add text (T)">Text</button>
     <div class="separator"></div>
     <label>Color:</label>
-    <input type="color" id="colorPicker" value="#e94560">
+    <input type="color" id="colorPicker" value="#FF6B6B">
     <label>Size:</label>
-    <input type="range" id="sizePicker" min="1" max="20" value="3">
+    <input type="range" id="sizePicker" min="2" max="30" value="6">
     <div class="separator"></div>
     <button id="exportBtn" title="Export as PNG">Export</button>
     <button id="newBtn" title="Load new image">New</button>
@@ -293,8 +293,8 @@
     let resizeHandle = null;
     let startX, startY;
     let dragOffsetX, dragOffsetY;
-    let currentColor = '#e94560';
-    let currentSize = 3;
+    let currentColor = '#FF6B6B';
+    let currentSize = 6;
     let layerIdCounter = 0;
     let history = [];
     let historyIndex = -1;
@@ -510,13 +510,19 @@
     }
 
     function drawLayer(layer, isSelected) {
+      const bounds = getLayerBounds(layer);
+
+      // Set up shadow for depth
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = layer.size * 2 + 4;
+      ctx.shadowOffsetX = layer.size / 2 + 2;
+      ctx.shadowOffsetY = layer.size / 2 + 2;
+
       ctx.strokeStyle = layer.color;
       ctx.fillStyle = layer.color;
       ctx.lineWidth = layer.size;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-
-      const bounds = getLayerBounds(layer);
 
       switch (layer.type) {
         case 'circle':
@@ -532,11 +538,13 @@
           break;
 
         case 'rect':
-          ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+          // Draw rounded rectangle for cleaner look
+          drawRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, Math.min(layer.size * 2, 12));
+          ctx.stroke();
           break;
 
         case 'arrow':
-          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, layer.size);
+          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, layer.size, layer.color);
           break;
 
         case 'line':
@@ -547,35 +555,95 @@
           break;
 
         case 'highlight':
-          ctx.fillStyle = layer.color + '40';
-          ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+          ctx.shadowColor = 'transparent';
+          ctx.fillStyle = layer.color + '35';
+          ctx.beginPath();
+          drawRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, 4);
+          ctx.fill();
           break;
 
         case 'text':
-          ctx.font = `${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
           ctx.fillText(layer.text, layer.x, layer.y);
           break;
       }
+
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
 
       if (isSelected) {
         drawSelectionHandles(bounds, layer.type);
       }
     }
 
-    function drawArrow(fromX, fromY, toX, toY, size) {
-      const headLength = Math.max(size * 4, 12);
-      const angle = Math.atan2(toY - fromY, toX - fromX);
-
+    function drawRoundedRect(x, y, width, height, radius) {
+      radius = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
       ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(toX, toY);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(toX, toY);
-      ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
       ctx.closePath();
+    }
+
+    function drawArrow(fromX, fromY, toX, toY, size, color) {
+      const angle = Math.atan2(toY - fromY, toX - fromX);
+      const length = Math.sqrt(Math.pow(toX - fromX, 2) + Math.pow(toY - fromY, 2));
+
+      // Arrow head dimensions - bold and chunky
+      const headLength = Math.max(size * 6, 25);
+      const headWidth = Math.max(size * 4, 18);
+      const shaftWidth = size;
+
+      // Calculate where the shaft meets the head
+      const shaftEndX = toX - headLength * Math.cos(angle);
+      const shaftEndY = toY - headLength * Math.sin(angle);
+
+      // Draw the entire arrow as one filled shape
+      ctx.beginPath();
+
+      // Start at the back of the arrow (rounded)
+      const backLeftX = fromX + shaftWidth * Math.cos(angle + Math.PI / 2);
+      const backLeftY = fromY + shaftWidth * Math.sin(angle + Math.PI / 2);
+      const backRightX = fromX + shaftWidth * Math.cos(angle - Math.PI / 2);
+      const backRightY = fromY + shaftWidth * Math.sin(angle - Math.PI / 2);
+
+      // Shaft sides
+      const shaftLeftX = shaftEndX + shaftWidth * Math.cos(angle + Math.PI / 2);
+      const shaftLeftY = shaftEndY + shaftWidth * Math.sin(angle + Math.PI / 2);
+      const shaftRightX = shaftEndX + shaftWidth * Math.cos(angle - Math.PI / 2);
+      const shaftRightY = shaftEndY + shaftWidth * Math.sin(angle - Math.PI / 2);
+
+      // Arrow head wings
+      const wingLeftX = shaftEndX + headWidth * Math.cos(angle + Math.PI / 2);
+      const wingLeftY = shaftEndY + headWidth * Math.sin(angle + Math.PI / 2);
+      const wingRightX = shaftEndX + headWidth * Math.cos(angle - Math.PI / 2);
+      const wingRightY = shaftEndY + headWidth * Math.sin(angle - Math.PI / 2);
+
+      // Draw arrow shape
+      ctx.moveTo(backLeftX, backLeftY);
+      // Rounded back
+      ctx.arc(fromX, fromY, shaftWidth, angle + Math.PI / 2, angle - Math.PI / 2, true);
+      // Right side of shaft
+      ctx.lineTo(shaftRightX, shaftRightY);
+      // Right wing
+      ctx.lineTo(wingRightX, wingRightY);
+      // Arrow tip
+      ctx.lineTo(toX, toY);
+      // Left wing
+      ctx.lineTo(wingLeftX, wingLeftY);
+      // Left side of shaft
+      ctx.lineTo(shaftLeftX, shaftLeftY);
+      ctx.closePath();
+
       ctx.fill();
     }
 
