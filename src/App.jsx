@@ -265,6 +265,7 @@ function App() {
           selectedLayerId={selectedLayerId}
           setSelectedLayerId={setSelectedLayerId}
           currentTool={currentTool}
+          setCurrentTool={setCurrentTool}
           currentTheme={currentTheme}
           addLayer={addLayer}
           updateLayer={updateLayer}

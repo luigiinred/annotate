@@ -18,6 +18,7 @@ function Canvas({
   selectedLayerId,
   setSelectedLayerId,
   currentTool,
+  setCurrentTool,
   currentTheme,
   addLayer,
   updateLayer
@@ -307,9 +308,11 @@ function Canvas({
 
       if (newLayer) {
         addLayer(currentTool, newLayer);
+        // Switch back to select mode after adding
+        setCurrentTool('select');
       }
     }
-  }, [currentTool, layers, selectedLayerId, getCanvasCoords, addLayer, setSelectedLayerId]);
+  }, [currentTool, layers, selectedLayerId, getCanvasCoords, addLayer, setSelectedLayerId, setCurrentTool]);
 
   const handleMouseMove = useCallback((e) => {
     if (!isDragging || !activeHandle) return;
@@ -400,9 +403,10 @@ function Canvas({
         text,
         fontSize: 24
       });
+      setCurrentTool('select');
     }
     setTextInput(null);
-  }, [textInput, addLayer]);
+  }, [textInput, addLayer, setCurrentTool]);
 
   useEffect(() => {
     const container = containerRef.current;
