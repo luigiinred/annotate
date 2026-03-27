@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import './App.css';
 import Toolbar from './components/Toolbar';
 import Canvas from './components/Canvas';
@@ -6,7 +6,21 @@ import LayersPanel from './components/LayersPanel';
 import DropZone from './components/DropZone';
 import HomeScreen from './components/HomeScreen';
 import { themes } from './utils/themes';
-import { autoSave, setCurrentProject, getProject } from './utils/storage';
+import { autoSave, setCurrentProject, getProject, saveProject, getCurrentProjectId } from './utils/storage';
+
+// Simple hash-based router
+function getRouteFromHash() {
+  const hash = window.location.hash.slice(1) || '/';
+  const match = hash.match(/^\/project\/(.+)$/);
+  if (match) {
+    return { page: 'project', projectId: match[1] };
+  }
+  return { page: 'home', projectId: null };
+}
+
+function navigateTo(path) {
+  window.location.hash = path;
+}
 
 function App() {
   const [image, setImage] = useState(null);
@@ -15,6 +29,7 @@ function App() {
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [currentTool, setCurrentTool] = useState('select');
   const [currentTheme, setCurrentTheme] = useState('sketch');
+  const [currentProjectId, setCurrentProjectId] = useState(null);
   const [selectedAssets, setSelectedAssets] = useState({
     arrow: 'arrow-straight',
     circle: 'circle-solid',
@@ -24,7 +39,61 @@ function App() {
   });
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isLoading, setIsLoading] = useState(true);
   const layerIdCounter = useRef(1);
+
+  // Load project from URL on mount and handle navigation
+  useEffect(() => {
+    function handleRouteChange() {
+      const route = getRouteFromHash();
+
+      if (route.page === 'project' && route.projectId) {
+        const project = getProject(route.projectId);
+        if (project) {
+          const img = new Image();
+          img.onload = () => {
+            setImage(img);
+            setImageData(project.imageData);
+            setLayers(project.layers || []);
+            setSelectedLayerId(null);
+            setHistory([JSON.stringify(project.layers || [])]);
+            setHistoryIndex(0);
+            setCurrentProjectId(route.projectId);
+            setCurrentProject(route.projectId);
+            setIsLoading(false);
+          };
+          img.onerror = () => {
+            // Project image failed to load, go home
+            navigateTo('/');
+            setIsLoading(false);
+          };
+          img.src = project.imageData;
+        } else {
+          // Project not found, go home
+          navigateTo('/');
+          setIsLoading(false);
+        }
+      } else {
+        // Home page
+        setImage(null);
+        setImageData(null);
+        setLayers([]);
+        setSelectedLayerId(null);
+        setHistory([]);
+        setHistoryIndex(-1);
+        setCurrentProjectId(null);
+        setCurrentProject(null);
+        setIsLoading(false);
+      }
+    }
+
+    // Initial load
+    handleRouteChange();
+
+    // Listen for back/forward navigation
+    window.addEventListener('hashchange', handleRouteChange);
+    return () => window.removeEventListener('hashchange', handleRouteChange);
+  }, []);
 
   const saveHistory = useCallback((newLayers) => {
     const newHistory = history.slice(0, historyIndex + 1);
@@ -39,10 +108,10 @@ function App() {
     if (addToHistory) {
       saveHistory(newLayers);
     }
-    if (imageData) {
+    if (imageData && currentProjectId) {
       autoSave(imageData, newLayers);
     }
-  }, [saveHistory, imageData]);
+  }, [saveHistory, imageData, currentProjectId]);
 
   const undo = useCallback(() => {
     if (historyIndex > 0) {
@@ -61,30 +130,21 @@ function App() {
   }, [history, historyIndex]);
 
   const handleImageLoad = useCallback((img, dataUrl) => {
+    // Save as new project and navigate to it
+    const projectId = saveProject(dataUrl, [], null);
+    setCurrentProject(projectId);
+    setCurrentProjectId(projectId);
     setImage(img);
     setImageData(dataUrl);
     setLayers([]);
     setSelectedLayerId(null);
-    setHistory([]);
-    setHistoryIndex(-1);
-    setCurrentProject(null);
+    setHistory([JSON.stringify([])]);
+    setHistoryIndex(0);
+    navigateTo(`/project/${projectId}`);
   }, []);
 
   const handleLoadProject = useCallback((projectId) => {
-    const project = getProject(projectId);
-    if (project) {
-      const img = new Image();
-      img.onload = () => {
-        setImage(img);
-        setImageData(project.imageData);
-        setLayers(project.layers || []);
-        setSelectedLayerId(null);
-        setHistory([JSON.stringify(project.layers || [])]);
-        setHistoryIndex(0);
-        setCurrentProject(projectId);
-      };
-      img.src = project.imageData;
-    }
+    navigateTo(`/project/${projectId}`);
   }, []);
 
   const addLayer = useCallback((type, props = {}) => {
@@ -156,17 +216,20 @@ function App() {
     updateLayers(newLayers);
   }, [layers, updateLayers]);
 
-  const clearAll = useCallback(() => {
-    setImage(null);
-    setImageData(null);
-    setLayers([]);
-    setSelectedLayerId(null);
-    setHistory([]);
-    setHistoryIndex(-1);
-    setCurrentProject(null);
+  const goHome = useCallback(() => {
+    navigateTo('/');
   }, []);
 
   const selectedLayer = layers.find(l => l.id === selectedLayerId);
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="app">
+        <div className="loading">Loading...</div>
+      </div>
+    );
+  }
 
   // Show home screen if no image loaded
   if (!image) {
@@ -193,7 +256,7 @@ function App() {
         canRedo={historyIndex < history.length - 1}
         onUndo={undo}
         onRedo={redo}
-        onClearAll={clearAll}
+        onGoHome={goHome}
       />
       <div className="main-content">
         <Canvas

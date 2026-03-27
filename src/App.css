@@ -18,6 +18,15 @@ body {
   width: 100vw;
 }
 
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 18px;
+  color: #888;
+}
+
 /* Home Screen */
 .home-screen {
   display: flex;

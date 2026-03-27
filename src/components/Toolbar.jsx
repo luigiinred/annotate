@@ -102,7 +102,7 @@ function Toolbar({
   canRedo,
   onUndo,
   onRedo,
-  onClearAll
+  onGoHome
 }) {
   const handleAssetChange = (toolId, assetId) => {
     setSelectedAssets(prev => ({ ...prev, [toolId]: assetId }));
@@ -155,8 +155,8 @@ function Toolbar({
       </div>
 
       <div className="tool-group">
-        <button className="tool-btn danger" onClick={onClearAll} title="Clear All">
-          ✕
+        <button className="tool-btn" onClick={onGoHome} title="Back to Home">
+          ⌂
         </button>
       </div>
     </div>
