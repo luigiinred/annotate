@@ -1106,25 +1106,33 @@
       }
     });
 
-    // Scroll wheel zoom
+    // Scroll/pinch handling
     canvasWrapper.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const rect = canvasWrapper.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
 
-      // Zoom toward mouse position
-      const oldZoom = zoom;
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.max(0.1, Math.min(10, zoom * delta));
+      if (e.ctrlKey) {
+        // Pinch gesture = zoom
+        const rect = canvasWrapper.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
 
-      // Adjust pan to zoom toward mouse
-      panX = mouseX - (mouseX - panX) * (newZoom / oldZoom);
-      panY = mouseY - (mouseY - panY) * (newZoom / oldZoom);
+        const oldZoom = zoom;
+        const delta = e.deltaY > 0 ? 0.95 : 1.05;
+        const newZoom = Math.max(0.1, Math.min(10, zoom * delta));
 
-      zoom = newZoom;
-      applyTransform();
-      document.getElementById('zoomLevel').textContent = Math.round(zoom * 100) + '%';
+        // Zoom toward mouse position
+        panX = mouseX - (mouseX - panX) * (newZoom / oldZoom);
+        panY = mouseY - (mouseY - panY) * (newZoom / oldZoom);
+
+        zoom = newZoom;
+        applyTransform();
+        document.getElementById('zoomLevel').textContent = Math.round(zoom * 100) + '%';
+      } else {
+        // Two-finger scroll = pan
+        panX -= e.deltaX;
+        panY -= e.deltaY;
+        applyTransform();
+      }
     }, { passive: false });
 
     // Default sizes for click-to-place annotations
