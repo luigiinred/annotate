@@ -67,6 +67,31 @@
       color: #aaa;
     }
 
+    .toolbar select {
+      background: #0f3460;
+      color: #eee;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .toolbar select:hover { background: #1a4a7a; }
+
+    .theme-preview {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .theme-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+
     .main-content {
       flex: 1;
       display: flex;
@@ -351,10 +376,17 @@
     <button id="highlightBtn" title="Highlight area (H)">Highlight</button>
     <button id="textBtn" title="Add text (T)">Text</button>
     <div class="separator"></div>
-    <label>Color:</label>
-    <input type="color" id="colorPicker" value="#FF6B6B">
-    <label>Size:</label>
-    <input type="range" id="sizePicker" min="2" max="30" value="6">
+    <label>Theme:</label>
+    <select id="themePicker">
+      <option value="sketch">Sketch</option>
+      <option value="marker">Marker</option>
+      <option value="pencil">Pencil</option>
+      <option value="highlighter">Highlighter</option>
+      <option value="comic">Comic</option>
+      <option value="coral">Coral</option>
+      <option value="ocean">Ocean</option>
+      <option value="minimal">Minimal</option>
+    </select>
     <div class="separator"></div>
     <button id="exportBtn" title="Export as PNG">Export</button>
     <button id="newBtn" title="Load new image">New</button>
@@ -391,8 +423,23 @@
       <div class="layer-settings" id="layerSettings" style="display: none;">
         <h4>Layer Settings</h4>
         <div class="setting-row">
+          <label>Theme</label>
+          <select id="layerTheme">
+            <option value="">Use Global</option>
+            <option value="sketch">Sketch</option>
+            <option value="marker">Marker</option>
+            <option value="pencil">Pencil</option>
+            <option value="highlighter">Highlighter</option>
+            <option value="comic">Comic</option>
+            <option value="coral">Coral</option>
+            <option value="ocean">Ocean</option>
+            <option value="minimal">Minimal</option>
+          </select>
+        </div>
+        <div class="setting-row">
           <label>Color</label>
           <input type="color" id="layerColor">
+          <label style="margin-left:8px"><input type="checkbox" id="layerCustomColor"> Custom</label>
         </div>
         <div class="setting-row">
           <label>Width</label>
@@ -447,6 +494,76 @@
     let panX = 0;
     let panY = 0;
     let lastPanX = 0;
+
+    // Theme definitions
+    const themes = {
+      sketch: {
+        name: 'Sketch',
+        color: '#2D2D2D',
+        strokeWidth: 2,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '15',
+        style: 'sketchy'
+      },
+      marker: {
+        name: 'Marker',
+        color: '#E53935',
+        strokeWidth: 4,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '40',
+        style: 'marker'
+      },
+      pencil: {
+        name: 'Pencil',
+        color: '#555555',
+        strokeWidth: 1.5,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '10',
+        style: 'sketchy'
+      },
+      highlighter: {
+        name: 'Highlighter',
+        color: '#FFEB3B',
+        strokeWidth: 20,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '50',
+        style: 'marker'
+      },
+      comic: {
+        name: 'Comic',
+        color: '#000000',
+        strokeWidth: 3,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '20',
+        style: 'bold'
+      },
+      coral: {
+        name: 'Coral',
+        color: '#FF6B6B',
+        strokeWidth: 6,
+        shadow: { color: 'rgba(0,0,0,0.25)', blur: 12, offsetX: 3, offsetY: 3 },
+        highlightOpacity: '35',
+        style: 'solid'
+      },
+      ocean: {
+        name: 'Ocean',
+        color: '#3B82F6',
+        strokeWidth: 5,
+        shadow: { color: 'rgba(59,130,246,0.25)', blur: 10, offsetX: 2, offsetY: 2 },
+        highlightOpacity: '30',
+        style: 'solid'
+      },
+      minimal: {
+        name: 'Minimal',
+        color: '#374151',
+        strokeWidth: 2,
+        shadow: { color: 'transparent', blur: 0, offsetX: 0, offsetY: 0 },
+        highlightOpacity: '15',
+        style: 'clean'
+      }
+    };
+
+    let currentTheme = 'sketch';
     let lastPanY = 0;
 
     // Tool buttons
@@ -482,30 +599,73 @@
       }
     }
 
-    document.getElementById('colorPicker').addEventListener('input', (e) => {
-      currentColor = e.target.value;
-      if (selectedLayerId !== null) {
-        const layer = layers.find(l => l.id === selectedLayerId);
-        if (layer) {
-          layer.color = currentColor;
-          saveHistory();
-          redraw();
-          renderLayers();
-        }
-      }
+    // Theme picker
+    document.getElementById('themePicker').addEventListener('change', (e) => {
+      currentTheme = e.target.value;
+      redraw();
     });
 
-    document.getElementById('sizePicker').addEventListener('input', (e) => {
-      currentSize = parseInt(e.target.value);
-      if (selectedLayerId !== null) {
-        const layer = layers.find(l => l.id === selectedLayerId);
-        if (layer) {
-          layer.size = currentSize;
-          saveHistory();
-          redraw();
-        }
+    // Get effective style for a layer (theme + overrides)
+    function getLayerStyle(layer) {
+      const themeKey = layer.theme || currentTheme;
+      const theme = themes[themeKey];
+      return {
+        color: layer.customColor ? layer.color : theme.color,
+        strokeWidth: layer.size || theme.strokeWidth,
+        shadow: theme.shadow,
+        highlightOpacity: theme.highlightOpacity,
+        style: theme.style || 'solid'
+      };
+    }
+
+    // Draw a sketchy/hand-drawn line
+    function drawSketchyLine(x1, y1, x2, y2, iterations = 2) {
+      const len = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+      const wobble = Math.min(len * 0.02, 3);
+
+      for (let i = 0; i < iterations; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x1 + (Math.random() - 0.5) * wobble, y1 + (Math.random() - 0.5) * wobble);
+
+        // Add some midpoint variation
+        const midX = (x1 + x2) / 2 + (Math.random() - 0.5) * wobble * 2;
+        const midY = (y1 + y2) / 2 + (Math.random() - 0.5) * wobble * 2;
+
+        ctx.quadraticCurveTo(midX, midY, x2 + (Math.random() - 0.5) * wobble, y2 + (Math.random() - 0.5) * wobble);
+        ctx.stroke();
       }
-    });
+    }
+
+    // Draw a sketchy ellipse
+    function drawSketchyEllipse(cx, cy, rx, ry, iterations = 2) {
+      const wobble = Math.min(Math.max(rx, ry) * 0.03, 4);
+
+      for (let i = 0; i < iterations; i++) {
+        ctx.beginPath();
+        const startAngle = (Math.random() - 0.5) * 0.2;
+
+        for (let a = 0; a <= Math.PI * 2 + 0.1; a += 0.1) {
+          const wobbleX = (Math.random() - 0.5) * wobble;
+          const wobbleY = (Math.random() - 0.5) * wobble;
+          const x = cx + (rx + wobbleX) * Math.cos(a + startAngle);
+          const y = cy + (ry + wobbleY) * Math.sin(a + startAngle);
+
+          if (a === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // Draw a sketchy rectangle
+    function drawSketchyRect(x, y, w, h, iterations = 2) {
+      for (let i = 0; i < iterations; i++) {
+        drawSketchyLine(x, y, x + w, y);
+        drawSketchyLine(x + w, y, x + w, y + h);
+        drawSketchyLine(x + w, y + h, x, y + h);
+        drawSketchyLine(x, y + h, x, y);
+      }
+    }
 
     document.getElementById('clearAllBtn').addEventListener('click', () => {
       layers = [];
@@ -762,59 +922,79 @@
 
     function drawLayer(layer, isSelected) {
       const bounds = getLayerBounds(layer);
+      const style = getLayerStyle(layer);
 
-      // Set up shadow for depth
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-      ctx.shadowBlur = layer.size * 2 + 4;
-      ctx.shadowOffsetX = layer.size / 2 + 2;
-      ctx.shadowOffsetY = layer.size / 2 + 2;
+      // Set up shadow from theme
+      ctx.shadowColor = style.shadow.color;
+      ctx.shadowBlur = style.shadow.blur;
+      ctx.shadowOffsetX = style.shadow.offsetX;
+      ctx.shadowOffsetY = style.shadow.offsetY;
 
-      ctx.strokeStyle = layer.color;
-      ctx.fillStyle = layer.color;
-      ctx.lineWidth = layer.size;
+      ctx.strokeStyle = style.color;
+      ctx.fillStyle = style.color;
+      ctx.lineWidth = style.strokeWidth;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
+      const isSketchy = style.style === 'sketchy' || style.style === 'marker';
+
       switch (layer.type) {
         case 'circle':
-          ctx.beginPath();
-          ctx.ellipse(
-            bounds.x + bounds.width / 2,
-            bounds.y + bounds.height / 2,
-            bounds.width / 2,
-            bounds.height / 2,
-            0, 0, Math.PI * 2
-          );
-          ctx.stroke();
+          if (isSketchy) {
+            drawSketchyEllipse(
+              bounds.x + bounds.width / 2,
+              bounds.y + bounds.height / 2,
+              bounds.width / 2,
+              bounds.height / 2,
+              style.style === 'marker' ? 1 : 2
+            );
+          } else {
+            ctx.beginPath();
+            ctx.ellipse(
+              bounds.x + bounds.width / 2,
+              bounds.y + bounds.height / 2,
+              bounds.width / 2,
+              bounds.height / 2,
+              0, 0, Math.PI * 2
+            );
+            ctx.stroke();
+          }
           break;
 
         case 'rect':
-          // Draw rounded rectangle for cleaner look
-          drawRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, Math.min(layer.size * 2, 12));
-          ctx.stroke();
+          if (isSketchy) {
+            drawSketchyRect(bounds.x, bounds.y, bounds.width, bounds.height, style.style === 'marker' ? 1 : 2);
+          } else {
+            drawRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, Math.min(style.strokeWidth * 2, 12));
+            ctx.stroke();
+          }
           break;
 
         case 'arrow':
-          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, layer.size, layer.color, layer.curveX, layer.curveY);
+          drawArrow(layer.x1, layer.y1, layer.x2, layer.y2, style.strokeWidth, style.color, layer.curveX, layer.curveY, style.style);
           break;
 
         case 'line':
-          ctx.beginPath();
-          ctx.moveTo(layer.x1, layer.y1);
-          ctx.lineTo(layer.x2, layer.y2);
-          ctx.stroke();
+          if (isSketchy) {
+            drawSketchyLine(layer.x1, layer.y1, layer.x2, layer.y2, style.style === 'marker' ? 1 : 2);
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(layer.x1, layer.y1);
+            ctx.lineTo(layer.x2, layer.y2);
+            ctx.stroke();
+          }
           break;
 
         case 'highlight':
           ctx.shadowColor = 'transparent';
-          ctx.fillStyle = layer.color + '35';
+          ctx.fillStyle = style.color + style.highlightOpacity;
           ctx.beginPath();
           drawRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, 4);
           ctx.fill();
           break;
 
         case 'text':
-          ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.font = `${style.style === 'bold' || style.style === 'comic' ? 'bold ' : ''}${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
           ctx.fillText(layer.text, layer.x, layer.y);
           break;
       }
@@ -845,26 +1025,51 @@
       ctx.closePath();
     }
 
-    function drawArrow(fromX, fromY, toX, toY, size, color, curveX, curveY) {
-      // Check if we have a curve
+    function drawArrow(fromX, fromY, toX, toY, size, color, curveX, curveY, drawStyle) {
       const hasCurve = curveX !== undefined && curveY !== undefined;
       const midX = (fromX + toX) / 2;
       const midY = (fromY + toY) / 2;
       const isCurved = hasCurve && (Math.abs(curveX - midX) > 5 || Math.abs(curveY - midY) > 5);
+      const isSketchy = drawStyle === 'sketchy' || drawStyle === 'marker';
 
-      // Arrow head dimensions
+      // For sketchy style, draw simple hand-drawn arrow
+      if (isSketchy) {
+        const angle = isCurved
+          ? Math.atan2(toY - curveY, toX - curveX)
+          : Math.atan2(toY - fromY, toX - fromX);
+        const headLength = Math.max(size * 4, 15);
+
+        // Draw shaft
+        if (isCurved) {
+          ctx.beginPath();
+          ctx.moveTo(fromX, fromY);
+          ctx.quadraticCurveTo(curveX, curveY, toX, toY);
+          ctx.stroke();
+        } else {
+          drawSketchyLine(fromX, fromY, toX, toY, drawStyle === 'marker' ? 1 : 2);
+        }
+
+        // Draw arrow head with two lines
+        const head1X = toX - headLength * Math.cos(angle - Math.PI / 6);
+        const head1Y = toY - headLength * Math.sin(angle - Math.PI / 6);
+        const head2X = toX - headLength * Math.cos(angle + Math.PI / 6);
+        const head2Y = toY - headLength * Math.sin(angle + Math.PI / 6);
+
+        drawSketchyLine(toX, toY, head1X, head1Y, 1);
+        drawSketchyLine(toX, toY, head2X, head2Y, 1);
+        return;
+      }
+
+      // Regular solid/bold arrow
       const headLength = Math.max(size * 5, 20);
       const headWidth = Math.max(size * 3.5, 14);
 
       if (isCurved) {
-        // Draw curved arrow
-        // Calculate angle at the end point (tangent of quadratic curve)
-        const t = 0.99; // Near the end
+        const t = 0.99;
         const tangentX = 2 * (1 - t) * (curveX - fromX) + 2 * t * (toX - curveX);
         const tangentY = 2 * (1 - t) * (curveY - fromY) + 2 * t * (toY - curveY);
         const endAngle = Math.atan2(tangentY, tangentX);
 
-        // Draw curved shaft
         ctx.lineWidth = size * 2;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -872,7 +1077,6 @@
         ctx.quadraticCurveTo(curveX, curveY, toX - headLength * 0.7 * Math.cos(endAngle), toY - headLength * 0.7 * Math.sin(endAngle));
         ctx.stroke();
 
-        // Draw arrow head
         ctx.beginPath();
         ctx.moveTo(toX, toY);
         ctx.lineTo(toX - headLength * Math.cos(endAngle - Math.PI / 7), toY - headLength * Math.sin(endAngle - Math.PI / 7));
@@ -881,34 +1085,18 @@
         ctx.closePath();
         ctx.fill();
       } else {
-        // Draw straight arrow
         const angle = Math.atan2(toY - fromY, toX - fromX);
         const shaftWidth = size;
-
-        // Calculate where the shaft meets the head
         const shaftEndX = toX - headLength * Math.cos(angle);
         const shaftEndY = toY - headLength * Math.sin(angle);
 
         ctx.beginPath();
-
-        // Rounded back
         ctx.arc(fromX, fromY, shaftWidth, angle + Math.PI / 2, angle - Math.PI / 2, true);
-
-        // Right side of shaft to head
         ctx.lineTo(shaftEndX + shaftWidth * Math.cos(angle - Math.PI / 2), shaftEndY + shaftWidth * Math.sin(angle - Math.PI / 2));
-
-        // Right wing
         ctx.lineTo(shaftEndX + headWidth * Math.cos(angle - Math.PI / 2), shaftEndY + headWidth * Math.sin(angle - Math.PI / 2));
-
-        // Arrow tip
         ctx.lineTo(toX, toY);
-
-        // Left wing
         ctx.lineTo(shaftEndX + headWidth * Math.cos(angle + Math.PI / 2), shaftEndY + headWidth * Math.sin(angle + Math.PI / 2));
-
-        // Left side of shaft
         ctx.lineTo(shaftEndX + shaftWidth * Math.cos(angle + Math.PI / 2), shaftEndY + shaftWidth * Math.sin(angle + Math.PI / 2));
-
         ctx.closePath();
         ctx.fill();
       }
@@ -1153,7 +1341,7 @@
       startY = y;
 
       if (currentTool === 'select') {
-        // Check for handle hit on selected layer
+        // Check for handle hit on selected layer first
         if (selectedLayerId !== null) {
           const layer = layers.find(l => l.id === selectedLayerId);
           if (layer) {
@@ -1166,7 +1354,17 @@
           }
         }
 
-        // Clicking elsewhere deselects (no clicking on layers to select)
+        // Check for clicking on any layer to select it
+        for (let i = layers.length - 1; i >= 0; i--) {
+          if (layers[i].visible !== false && hitTest(x, y, layers[i])) {
+            selectedLayerId = layers[i].id;
+            redraw();
+            renderLayers();
+            return;
+          }
+        }
+
+        // Clicking elsewhere deselects
         selectedLayerId = null;
         redraw();
         renderLayers();
