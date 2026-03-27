@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenshot Annotator</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .toolbar {
+      background: #16213e;
+      padding: 12px 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    .toolbar button {
+      background: #0f3460;
+      color: #eee;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+
+    .toolbar button:hover {
+      background: #e94560;
+    }
+
+    .toolbar button.active {
+      background: #e94560;
+    }
+
+    .toolbar .separator {
+      width: 1px;
+      height: 30px;
+      background: #0f3460;
+      margin: 0 5px;
+    }
+
+    .toolbar input[type="color"] {
+      width: 40px;
+      height: 36px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    .toolbar input[type="range"] {
+      width: 80px;
+      cursor: pointer;
+    }
+
+    .toolbar label {
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .canvas-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow: auto;
+    }
+
+    #canvas {
+      background: #2a2a4a;
+      border-radius: 8px;
+      cursor: crosshair;
+      max-width: 100%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+
+    .drop-zone {
+      border: 3px dashed #0f3460;
+      border-radius: 12px;
+      padding: 60px;
+      text-align: center;
+      color: #aaa;
+      transition: all 0.3s;
+    }
+
+    .drop-zone.dragover {
+      border-color: #e94560;
+      background: rgba(233, 69, 96, 0.1);
+    }
+
+    .drop-zone h2 {
+      margin-bottom: 10px;
+      color: #eee;
+    }
+
+    .drop-zone p {
+      margin-bottom: 20px;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .instructions {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(22, 33, 62, 0.9);
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar" id="toolbar" style="display: none;">
+    <button id="selectBtn" class="active" title="Select/Move">Select</button>
+    <button id="cropBtn" title="Crop image">Crop</button>
+    <div class="separator"></div>
+    <button id="circleBtn" title="Draw circle">Circle</button>
+    <button id="rectBtn" title="Draw rectangle">Rectangle</button>
+    <button id="arrowBtn" title="Draw arrow">Arrow</button>
+    <button id="lineBtn" title="Draw line">Line</button>
+    <button id="highlightBtn" title="Highlight area">Highlight</button>
+    <button id="textBtn" title="Add text">Text</button>
+    <div class="separator"></div>
+    <label>Color:</label>
+    <input type="color" id="colorPicker" value="#e94560">
+    <label>Size:</label>
+    <input type="range" id="sizePicker" min="1" max="20" value="3">
+    <div class="separator"></div>
+    <button id="undoBtn" title="Undo last action">Undo</button>
+    <button id="clearBtn" title="Clear all annotations">Clear</button>
+    <div class="separator"></div>
+    <button id="exportBtn" title="Export as PNG">Export PNG</button>
+    <button id="newBtn" title="Load new image">New Image</button>
+  </div>
+
+  <div class="canvas-container" id="canvasContainer">
+    <div class="drop-zone" id="dropZone">
+      <h2>Drop Screenshot Here</h2>
+      <p>or click to select a file</p>
+      <button onclick="document.getElementById('fileInput').click()">Choose File</button>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <canvas id="canvas" style="display: none;"></canvas>
+  </div>
+
+  <div class="instructions" id="instructions" style="display: none;">
+    <strong>Tips:</strong> Click and drag to draw. Press Escape to cancel. Ctrl+Z to undo.
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const dropZone = document.getElementById('dropZone');
+    const toolbar = document.getElementById('toolbar');
+    const instructions = document.getElementById('instructions');
+    const fileInput = document.getElementById('fileInput');
+
+    let baseImage = null;
+    let annotations = [];
+    let currentTool = 'select';
+    let isDrawing = false;
+    let startX, startY;
+    let currentColor = '#e94560';
+    let currentSize = 3;
+    let cropStart = null;
+
+    // Tool buttons
+    const tools = ['select', 'crop', 'circle', 'rect', 'arrow', 'line', 'highlight', 'text'];
+    tools.forEach(tool => {
+      const btn = document.getElementById(tool + 'Btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          currentTool = tool;
+          updateToolButtons();
+        });
+      }
+    });
+
+    function updateToolButtons() {
+      tools.forEach(tool => {
+        const btn = document.getElementById(tool + 'Btn');
+        if (btn) {
+          btn.classList.toggle('active', currentTool === tool);
+        }
+      });
+      canvas.style.cursor = currentTool === 'select' ? 'default' : 'crosshair';
+    }
+
+    // Color and size pickers
+    document.getElementById('colorPicker').addEventListener('input', (e) => {
+      currentColor = e.target.value;
+    });
+
+    document.getElementById('sizePicker').addEventListener('input', (e) => {
+      currentSize = parseInt(e.target.value);
+    });
+
+    // Action buttons
+    document.getElementById('undoBtn').addEventListener('click', () => {
+      if (annotations.length > 0) {
+        annotations.pop();
+        redraw();
+      }
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      annotations = [];
+      redraw();
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', exportImage);
+
+    document.getElementById('newBtn').addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        isDrawing = false;
+        redraw();
+      }
+      if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        if (annotations.length > 0) {
+          annotations.pop();
+          redraw();
+        }
+      }
+    });
+
+    // Drag and drop
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        loadImage(file);
+      }
+    });
+
+    dropZone.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        loadImage(file);
+      }
+    });
+
+    function loadImage(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          baseImage = img;
+          annotations = [];
+
+          // Set canvas size (limit max dimensions for performance)
+          const maxWidth = Math.min(img.width, window.innerWidth - 100);
+          const maxHeight = Math.min(img.height, window.innerHeight - 150);
+          const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+
+          dropZone.style.display = 'none';
+          canvas.style.display = 'block';
+          toolbar.style.display = 'flex';
+          instructions.style.display = 'block';
+
+          redraw();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function redraw() {
+      if (!baseImage) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+
+      annotations.forEach(drawAnnotation);
+    }
+
+    function drawAnnotation(ann) {
+      ctx.strokeStyle = ann.color;
+      ctx.fillStyle = ann.color;
+      ctx.lineWidth = ann.size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      switch (ann.type) {
+        case 'circle':
+          ctx.beginPath();
+          const radius = Math.sqrt(Math.pow(ann.endX - ann.startX, 2) + Math.pow(ann.endY - ann.startY, 2));
+          ctx.arc(ann.startX, ann.startY, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+
+        case 'rect':
+          ctx.strokeRect(ann.startX, ann.startY, ann.endX - ann.startX, ann.endY - ann.startY);
+          break;
+
+        case 'arrow':
+          drawArrow(ann.startX, ann.startY, ann.endX, ann.endY, ann.size);
+          break;
+
+        case 'line':
+          ctx.beginPath();
+          ctx.moveTo(ann.startX, ann.startY);
+          ctx.lineTo(ann.endX, ann.endY);
+          ctx.stroke();
+          break;
+
+        case 'highlight':
+          ctx.fillStyle = ann.color + '40'; // 25% opacity
+          ctx.fillRect(ann.startX, ann.startY, ann.endX - ann.startX, ann.endY - ann.startY);
+          break;
+
+        case 'text':
+          ctx.font = `${ann.size * 6}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.fillText(ann.text, ann.startX, ann.startY);
+          break;
+      }
+    }
+
+    function drawArrow(fromX, fromY, toX, toY, size) {
+      const headLength = size * 5;
+      const angle = Math.atan2(toY - fromY, toX - fromX);
+
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(toX, toY);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(toX, toY);
+      ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Canvas mouse events
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      startX = e.clientX - rect.left;
+      startY = e.clientY - rect.top;
+      isDrawing = true;
+
+      if (currentTool === 'text') {
+        const text = prompt('Enter text:');
+        if (text) {
+          annotations.push({
+            type: 'text',
+            startX,
+            startY,
+            text,
+            color: currentColor,
+            size: currentSize
+          });
+          redraw();
+        }
+        isDrawing = false;
+      }
+
+      if (currentTool === 'crop') {
+        cropStart = { x: startX, y: startY };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDrawing) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+
+      redraw();
+
+      // Preview
+      ctx.strokeStyle = currentColor;
+      ctx.fillStyle = currentColor;
+      ctx.lineWidth = currentSize;
+      ctx.setLineDash([5, 5]);
+
+      switch (currentTool) {
+        case 'circle':
+          const radius = Math.sqrt(Math.pow(currentX - startX, 2) + Math.pow(currentY - startY, 2));
+          ctx.beginPath();
+          ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+
+        case 'rect':
+          ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+          break;
+
+        case 'arrow':
+        case 'line':
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(currentX, currentY);
+          ctx.stroke();
+          break;
+
+        case 'highlight':
+          ctx.fillStyle = currentColor + '40';
+          ctx.fillRect(startX, startY, currentX - startX, currentY - startY);
+          break;
+
+        case 'crop':
+          ctx.strokeStyle = '#fff';
+          ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+          // Darken outside area
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(0, 0, canvas.width, startY);
+          ctx.fillRect(0, currentY, canvas.width, canvas.height - currentY);
+          ctx.fillRect(0, startY, startX, currentY - startY);
+          ctx.fillRect(currentX, startY, canvas.width - currentX, currentY - startY);
+          break;
+      }
+
+      ctx.setLineDash([]);
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (!isDrawing) return;
+      isDrawing = false;
+
+      const rect = canvas.getBoundingClientRect();
+      const endX = e.clientX - rect.left;
+      const endY = e.clientY - rect.top;
+
+      if (currentTool === 'crop' && cropStart) {
+        applyCrop(startX, startY, endX, endY);
+        cropStart = null;
+        return;
+      }
+
+      if (currentTool !== 'select' && currentTool !== 'text' && currentTool !== 'crop') {
+        annotations.push({
+          type: currentTool,
+          startX,
+          startY,
+          endX,
+          endY,
+          color: currentColor,
+          size: currentSize
+        });
+      }
+
+      redraw();
+    });
+
+    function applyCrop(x1, y1, x2, y2) {
+      const cropX = Math.min(x1, x2);
+      const cropY = Math.min(y1, y2);
+      const cropWidth = Math.abs(x2 - x1);
+      const cropHeight = Math.abs(y2 - y1);
+
+      if (cropWidth < 10 || cropHeight < 10) {
+        redraw();
+        return;
+      }
+
+      // Create temporary canvas for cropped image
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = cropWidth;
+      tempCanvas.height = cropHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      // Draw current canvas (with annotations) to temp
+      tempCtx.drawImage(canvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+      // Create new image from cropped area
+      const croppedImg = new Image();
+      croppedImg.onload = () => {
+        baseImage = croppedImg;
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
+        annotations = [];
+        redraw();
+      };
+      croppedImg.src = tempCanvas.toDataURL();
+    }
+
+    function exportImage() {
+      const link = document.createElement('a');
+      link.download = 'annotated-screenshot.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // Paste from clipboard
+    document.addEventListener('paste', (e) => {
+      const items = e.clipboardData.items;
+      for (let item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          loadImage(file);
+          break;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
