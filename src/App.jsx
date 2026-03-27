@@ -15,6 +15,13 @@ function App() {
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [currentTool, setCurrentTool] = useState('select');
   const [currentTheme, setCurrentTheme] = useState('sketch');
+  const [selectedAssets, setSelectedAssets] = useState({
+    arrow: 'arrow-straight',
+    circle: 'circle-solid',
+    rect: 'rect-solid',
+    highlight: 'highlight-solid',
+    line: 'line-solid'
+  });
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const layerIdCounter = useRef(1);
@@ -91,6 +98,7 @@ function App() {
       theme: currentTheme,
       color: theme.color,
       size: theme.strokeWidth,
+      assetId: selectedAssets[type] || null,
       ...props
     };
 
@@ -98,7 +106,7 @@ function App() {
     updateLayers(newLayers);
     setSelectedLayerId(id);
     return id;
-  }, [layers, currentTheme, updateLayers]);
+  }, [layers, currentTheme, selectedAssets, updateLayers]);
 
   const updateLayer = useCallback((id, updates) => {
     const newLayers = layers.map(layer =>
@@ -179,6 +187,8 @@ function App() {
         setCurrentTool={setCurrentTool}
         currentTheme={currentTheme}
         setCurrentTheme={setCurrentTheme}
+        selectedAssets={selectedAssets}
+        setSelectedAssets={setSelectedAssets}
         canUndo={historyIndex > 0}
         canRedo={historyIndex < history.length - 1}
         onUndo={undo}

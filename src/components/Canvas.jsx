@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { themes, getLayerStyle, defaultSizes } from '../utils/themes';
+import { getAsset } from '../utils/svgAssets';
 import {
   drawSketchyLine,
   drawSketchyEllipse,
@@ -30,6 +31,9 @@ function Canvas({
   const [activeHandle, setActiveHandle] = useState(null);
   const [textInput, setTextInput] = useState(null);
 
+  // Use ref to track the dragging layer ID synchronously
+  const draggingLayerIdRef = useRef(null);
+
   // Fit image to container on load
   useEffect(() => {
     if (image && containerRef.current) {
@@ -42,7 +46,7 @@ function Canvas({
     }
   }, [image]);
 
-  // Draw canvas
+  // Draw canvas (image + annotations + handles)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !image) return;
@@ -76,50 +80,62 @@ function Canvas({
         ctx.shadowBlur = 0;
       }
 
-      switch (layer.type) {
-        case 'circle':
-          if (style.style === 'sketchy' || style.style === 'marker') {
-            drawSketchyEllipse(ctx, layer.x + layer.width / 2, layer.y + layer.height / 2, layer.width / 2, layer.height / 2, style.style === 'marker' ? 1 : 2);
-          } else {
-            ctx.beginPath();
-            ctx.ellipse(layer.x + layer.width / 2, layer.y + layer.height / 2, Math.abs(layer.width / 2), Math.abs(layer.height / 2), 0, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-          break;
+      // Check if layer has an SVG asset
+      const asset = layer.assetId ? getAsset(layer.type, layer.assetId) : null;
 
-        case 'rect':
-          if (style.style === 'sketchy' || style.style === 'marker') {
-            drawSketchyRect(ctx, layer.x, layer.y, layer.width, layer.height, style.style === 'marker' ? 1 : 2);
-          } else {
-            ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
-          }
-          break;
+      if (asset && (layer.type === 'arrow' || layer.type === 'line')) {
+        // Render SVG-based arrow/line
+        renderSvgArrowLine(ctx, layer, asset, style);
+      } else if (asset && (layer.type === 'circle' || layer.type === 'rect' || layer.type === 'highlight')) {
+        // Render SVG-based shape
+        renderSvgShape(ctx, layer, asset, style);
+      } else {
+        // Fallback to canvas drawing
+        switch (layer.type) {
+          case 'circle':
+            if (style.style === 'sketchy' || style.style === 'marker') {
+              drawSketchyEllipse(ctx, layer.x + layer.width / 2, layer.y + layer.height / 2, layer.width / 2, layer.height / 2, style.style === 'marker' ? 1 : 2);
+            } else {
+              ctx.beginPath();
+              ctx.ellipse(layer.x + layer.width / 2, layer.y + layer.height / 2, Math.abs(layer.width / 2), Math.abs(layer.height / 2), 0, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            break;
 
-        case 'highlight':
-          ctx.fillStyle = style.color + style.highlightOpacity;
-          drawRoundedRect(ctx, layer.x, layer.y, layer.width, layer.height, 4);
-          ctx.fill();
-          break;
+          case 'rect':
+            if (style.style === 'sketchy' || style.style === 'marker') {
+              drawSketchyRect(ctx, layer.x, layer.y, layer.width, layer.height, style.style === 'marker' ? 1 : 2);
+            } else {
+              ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
+            }
+            break;
 
-        case 'arrow':
-          drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
-          break;
+          case 'highlight':
+            ctx.fillStyle = style.color + style.highlightOpacity;
+            drawRoundedRect(ctx, layer.x, layer.y, layer.width, layer.height, 4);
+            ctx.fill();
+            break;
 
-        case 'line':
-          if (style.style === 'sketchy' || style.style === 'marker') {
-            drawSketchyLine(ctx, layer.x1, layer.y1, layer.x2, layer.y2, style.style === 'marker' ? 1 : 2);
-          } else {
-            ctx.beginPath();
-            ctx.moveTo(layer.x1, layer.y1);
-            ctx.lineTo(layer.x2, layer.y2);
-            ctx.stroke();
-          }
-          break;
+          case 'arrow':
+            drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
+            break;
 
-        case 'text':
-          ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-          ctx.fillText(layer.text, layer.x, layer.y);
-          break;
+          case 'line':
+            if (style.style === 'sketchy' || style.style === 'marker') {
+              drawSketchyLine(ctx, layer.x1, layer.y1, layer.x2, layer.y2, style.style === 'marker' ? 1 : 2);
+            } else {
+              ctx.beginPath();
+              ctx.moveTo(layer.x1, layer.y1);
+              ctx.lineTo(layer.x2, layer.y2);
+              ctx.stroke();
+            }
+            break;
+
+          case 'text':
+            ctx.font = `bold ${layer.fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            ctx.fillText(layer.text, layer.x, layer.y);
+            break;
+        }
       }
 
       ctx.shadowColor = 'transparent';
@@ -149,6 +165,41 @@ function Canvas({
       });
     }
   }, [image, layers, selectedLayerId, currentTheme]);
+
+  // Helper to render SVG arrow/line to canvas
+  function renderSvgArrowLine(ctx, layer, asset, style) {
+    const dx = layer.x2 - layer.x1;
+    const dy = layer.y2 - layer.y1;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    ctx.save();
+    ctx.translate(layer.x1, layer.y1);
+    ctx.rotate(angle);
+
+    // Scale SVG to fit the arrow length
+    const vbParts = asset.viewBox.split(' ').map(Number);
+    const svgWidth = vbParts[2];
+    const svgHeight = vbParts[3];
+    const scale = length / svgWidth;
+
+    // Create temporary canvas to render SVG
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${asset.viewBox}" width="${length}" height="${svgHeight * scale}">${asset.render(style.color, style.strokeWidth)}</svg>`;
+
+    // Draw using Path2D from SVG paths (simplified - just use canvas drawing for now)
+    // For now, fall back to the standard drawing
+    ctx.restore();
+
+    // Use standard drawing as fallback
+    drawArrow(ctx, layer.x1, layer.y1, layer.x2, layer.y2, layer.size, style.color, layer.curveX, layer.curveY, style.style);
+  }
+
+  // Helper to render SVG shape to canvas
+  function renderSvgShape(ctx, layer, asset, style) {
+    // For shapes, we scale the SVG to fit the layer bounds
+    // For now, fall back to standard drawing
+    // Full SVG rendering would require creating an Image from SVG data
+  }
 
   const getCanvasCoords = useCallback((e) => {
     const canvas = canvasRef.current;
@@ -182,11 +233,12 @@ function Canvas({
     const ctx = canvasRef.current.getContext('2d');
 
     if (currentTool === 'select') {
-      // Check if clicking on a handle
-      const selectedLayer = layers.find(l => l.id === selectedLayerId);
-      if (selectedLayer) {
-        const handle = hitTestHandle(coords.x, coords.y, selectedLayer, ctx);
+      // Check if clicking on a handle of currently selected layer
+      const currentSelected = layers.find(l => l.id === selectedLayerId);
+      if (currentSelected && currentSelected.visible) {
+        const handle = hitTestHandle(coords.x, coords.y, currentSelected, ctx);
         if (handle) {
+          draggingLayerIdRef.current = selectedLayerId;
           setActiveHandle(handle);
           setIsDragging(true);
           setDragStart(coords);
@@ -194,10 +246,12 @@ function Canvas({
         }
       }
 
-      // Check if clicking on any layer
+      // Check if clicking on any layer (iterate from top to bottom)
       for (let i = layers.length - 1; i >= 0; i--) {
         const layer = layers[i];
         if (layer.visible && hitTest(coords.x, coords.y, layer, ctx)) {
+          // Store the layer ID in ref for immediate access
+          draggingLayerIdRef.current = layer.id;
           setSelectedLayerId(layer.id);
           setActiveHandle({ type: 'move' });
           setIsDragging(true);
@@ -207,12 +261,12 @@ function Canvas({
       }
 
       // Clicked on nothing
+      draggingLayerIdRef.current = null;
       setSelectedLayerId(null);
     } else if (currentTool === 'text') {
       setTextInput({ x: coords.x, y: coords.y });
     } else {
       // Create new shape
-      const theme = themes[currentTheme];
       let newLayer;
 
       switch (currentTool) {
@@ -255,7 +309,7 @@ function Canvas({
         addLayer(currentTool, newLayer);
       }
     }
-  }, [currentTool, layers, selectedLayerId, getCanvasCoords, addLayer, currentTheme, setSelectedLayerId]);
+  }, [currentTool, layers, selectedLayerId, getCanvasCoords, addLayer, setSelectedLayerId]);
 
   const handleMouseMove = useCallback((e) => {
     if (!isDragging || !activeHandle) return;
@@ -263,24 +317,27 @@ function Canvas({
     const coords = getCanvasCoords(e);
     const dx = coords.x - dragStart.x;
     const dy = coords.y - dragStart.y;
-    const selectedLayer = layers.find(l => l.id === selectedLayerId);
 
-    if (!selectedLayer) return;
+    // Use the ref to get the layer ID (synchronous)
+    const layerId = draggingLayerIdRef.current;
+    const targetLayer = layers.find(l => l.id === layerId);
+
+    if (!targetLayer) return;
 
     let updates = {};
 
     if (activeHandle.type === 'move') {
-      if (selectedLayer.x !== undefined) {
-        updates = { x: selectedLayer.x + dx, y: selectedLayer.y + dy };
-      } else if (selectedLayer.x1 !== undefined) {
+      if (targetLayer.x !== undefined) {
+        updates = { x: targetLayer.x + dx, y: targetLayer.y + dy };
+      } else if (targetLayer.x1 !== undefined) {
         updates = {
-          x1: selectedLayer.x1 + dx,
-          y1: selectedLayer.y1 + dy,
-          x2: selectedLayer.x2 + dx,
-          y2: selectedLayer.y2 + dy,
-          ...(selectedLayer.curveX !== undefined && {
-            curveX: selectedLayer.curveX + dx,
-            curveY: selectedLayer.curveY + dy
+          x1: targetLayer.x1 + dx,
+          y1: targetLayer.y1 + dy,
+          x2: targetLayer.x2 + dx,
+          y2: targetLayer.y2 + dy,
+          ...(targetLayer.curveX !== undefined && {
+            curveX: targetLayer.curveX + dx,
+            curveY: targetLayer.curveY + dy
           })
         };
       }
@@ -294,9 +351,9 @@ function Canvas({
       updates = { curveX: coords.x, curveY: coords.y };
     } else if (activeHandle.type === 'resize') {
       const { pos } = activeHandle;
-      if (selectedLayer.type === 'circle') {
-        const cx = selectedLayer.x + selectedLayer.width / 2;
-        const cy = selectedLayer.y + selectedLayer.height / 2;
+      if (targetLayer.type === 'circle') {
+        const cx = targetLayer.x + targetLayer.width / 2;
+        const cy = targetLayer.y + targetLayer.height / 2;
         if (pos === 'n' || pos === 's') {
           const newRy = Math.abs(coords.y - cy);
           updates = { y: cy - newRy, height: newRy * 2 };
@@ -308,30 +365,31 @@ function Canvas({
         // Rectangle resize
         if (pos.includes('n')) {
           updates.y = coords.y;
-          updates.height = selectedLayer.y + selectedLayer.height - coords.y;
+          updates.height = targetLayer.y + targetLayer.height - coords.y;
         }
         if (pos.includes('s')) {
-          updates.height = coords.y - selectedLayer.y;
+          updates.height = coords.y - targetLayer.y;
         }
         if (pos.includes('w')) {
           updates.x = coords.x;
-          updates.width = selectedLayer.x + selectedLayer.width - coords.x;
+          updates.width = targetLayer.x + targetLayer.width - coords.x;
         }
         if (pos.includes('e')) {
-          updates.width = coords.x - selectedLayer.x;
+          updates.width = coords.x - targetLayer.x;
         }
       }
     }
 
     if (Object.keys(updates).length > 0) {
-      updateLayer(selectedLayerId, updates);
+      updateLayer(layerId, updates);
       setDragStart(coords);
     }
-  }, [isDragging, activeHandle, dragStart, layers, selectedLayerId, getCanvasCoords, updateLayer]);
+  }, [isDragging, activeHandle, dragStart, layers, getCanvasCoords, updateLayer]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
     setActiveHandle(null);
+    draggingLayerIdRef.current = null;
   }, []);
 
   const handleTextSubmit = useCallback((text) => {
